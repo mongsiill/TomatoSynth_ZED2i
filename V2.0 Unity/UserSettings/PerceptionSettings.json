@@ -1,0 +1,6 @@
+{
+  "UnityEngine.Perception.GroundTruth.Consumers.SoloEndpoint.output_path": {
+    "type": "String",
+    "value": "D:/Tomato_farm_new/V2.0 Unity (copy)/dataset"
+  }
+}
