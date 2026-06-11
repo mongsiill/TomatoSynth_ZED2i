@@ -39,6 +39,8 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
         if (rig == null)
             rig = GetComponent<Zed2iStereoCameraRig>();
 
+        TomatoBodySubmeshExcluder.ApplyToScene(rig);
+
         SetupMaskCamera();
         SetupMaskMaterial();
         AllocateBuffers();
@@ -53,7 +55,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
             Destroy(maskMaterial);
     }
 
-    private void Update()
+    private void LateUpdate()
     {
         if (ShouldCaptureThisFrame())
             RequestCapture();
@@ -75,16 +77,48 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
         if (captureInProgress)
             return;
 
-        StartCoroutine(CaptureAtEndOfFrame());
-    }
-
-    private IEnumerator CaptureAtEndOfFrame()
-    {
         captureInProgress = true;
 
+        string frameId = frameIndex.ToString("D6");
+        int imageId = frameIndex;
+        CocoDataset coco = CaptureOneFrameCocoRleJson(imageId);
+
+        if (coco == null)
+        {
+            captureInProgress = false;
+            return;
+        }
+
+        StartCoroutine(WriteCaptureAtEndOfFrame(coco, frameId));
+    }
+
+    private IEnumerator WriteCaptureAtEndOfFrame(CocoDataset coco, string frameId)
+    {
         yield return new WaitForEndOfFrame();
 
-        CaptureOneFrameCocoRleJson();
+        if (!TryGetPerceptionImageFileName(out string imageFileName))
+        {
+            Debug.LogWarning(
+                $"[COCO RLE] Skipped annotations_{frameId}.json because no Perception step was found for frame {Time.frameCount}."
+            );
+
+            captureInProgress = false;
+            yield break;
+        }
+
+        coco.images[0].file_name = imageFileName;
+
+        string outputDir = GetOutputDirectory();
+        Directory.CreateDirectory(outputDir);
+
+        string jsonPath = Path.Combine(outputDir, $"annotations_{frameId}.json");
+        File.WriteAllText(jsonPath, JsonUtility.ToJson(coco, true));
+
+        Debug.Log(
+            $"[COCO RLE] Saved={jsonPath}"
+        );
+
+        frameIndex++;
 
         captureInProgress = false;
     }
@@ -106,7 +140,11 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
             if (renderers.Length == 0)
                 continue;
 
-            string label = GetRipenessLabel(tr.GetComponent<Labeling>());
+            Labeling labeling = tr.GetComponent<Labeling>();
+            if (labeling == null || !labeling.enabled)
+                continue;
+
+            string label = GetRipenessLabel(labeling);
             int categoryId = LabelToCategoryId(label);
 
             if (categoryId < 0)
@@ -124,10 +162,10 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
         cacheBuilt = true;
     }
 
-    private void CaptureOneFrameCocoRleJson()
+    private CocoDataset CaptureOneFrameCocoRleJson(int imageId)
     {
         if (!ValidateReady())
-            return;
+            return null;
 
         if (!cacheBuilt || cachedTomatoes.Count == 0)
             RebuildTomatoCache();
@@ -138,10 +176,8 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
 
         int width = rig.imageWidth;
         int height = rig.imageHeight;
-        string frameId = frameIndex.ToString("D6");
-        int imageId = frameIndex;
 
-        CocoDataset coco = CreateCocoDataset(imageId, frameId, width, height);
+        CocoDataset coco = CreateCocoDataset(imageId, string.Empty, width, height);
         List<TomatoTarget> candidates = GetCameraVisibleTomatoes();
 
         int annotationId = 1;
@@ -173,17 +209,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
             annotationId++;
         }
 
-        string outputDir = GetOutputDirectory();
-        Directory.CreateDirectory(outputDir);
-
-        string jsonPath = Path.Combine(outputDir, $"annotations_{frameId}.json");
-        File.WriteAllText(jsonPath, JsonUtility.ToJson(coco, true));
-
-        Debug.Log(
-            $"[COCO RLE] Saved={jsonPath}"
-        );
-
-        frameIndex++;
+        return coco;
     }
 
     private string GetOutputDirectory()
@@ -193,6 +219,26 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
             return Path.Combine(soloEndpoint.currentPath, OutputFolderName);
 
         return Path.Combine(rig.GetDatasetRootPath(), OutputFolderName);
+    }
+
+    private bool TryGetPerceptionImageFileName(out string imageFileName)
+    {
+        if (TryGetPerceptionSequenceStep(Time.frameCount, out int sequence, out int step))
+        {
+            imageFileName = $"step{step}.camera.png";
+            return true;
+        }
+
+        imageFileName = null;
+        return false;
+    }
+
+    private bool TryGetPerceptionSequenceStep(int frame, out int sequence, out int step)
+    {
+        var sequenceAndStep = DatasetCapture.GetSequenceAndStepFromFrame(frame);
+        sequence = sequenceAndStep.Item1;
+        step = sequenceAndStep.Item2;
+        return sequence >= 0 && step >= 0;
     }
 
     private bool ValidateReady()
@@ -212,7 +258,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
         return true;
     }
 
-    private CocoDataset CreateCocoDataset(int imageId, string frameId, int width, int height)
+    private CocoDataset CreateCocoDataset(int imageId, string imageFileName, int width, int height)
     {
         return new CocoDataset
         {
@@ -226,7 +272,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
                 new CocoImage
                 {
                     id = imageId,
-                    file_name = $"{frameId}.png",
+                    file_name = imageFileName,
                     width = width,
                     height = height
                 }
