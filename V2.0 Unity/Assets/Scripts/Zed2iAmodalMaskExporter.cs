@@ -154,6 +154,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
             {
                 root = tr,
                 objectName = tr.name,
+                labeling = labeling,
                 categoryId = categoryId,
                 renderers = renderers
             });
@@ -199,6 +200,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
                 id = annotationId,
                 image_id = imageId,
                 category_id = target.categoryId,
+                instance_id = (int)target.labeling.instanceId,
                 object_name = target.objectName,
                 segmentation = EncodeBinaryMaskToCocoRle(mask, width, height),
                 bbox = bbox,
@@ -701,6 +703,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
     {
         public Transform root;
         public string objectName;
+        public Labeling labeling;
         public int categoryId;
         public Renderer[] renderers;
     }
@@ -751,6 +754,7 @@ public class Zed2iCocoRleMaskJsonExporter : MonoBehaviour
         public int id;
         public int image_id;
         public int category_id;
+        public int instance_id;
         public string object_name;
         public CocoRle segmentation;
         public int[] bbox;
